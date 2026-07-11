@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
+import useSettings from "@/lib/useSettings";
 
 interface OrderItem {
     productTitle: string;
@@ -49,8 +50,9 @@ const PAYMENT_BADGE: Record<string, string> = {
     refunded: "bg-gray-100 text-gray-600 ring-1 ring-gray-300",
 };
 
-function fmt(n: number) {
-    return Number(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+function fmt(n: number, symbol?: string) {
+    const formatted = Number(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return symbol ? `${symbol}${formatted}` : formatted;
 }
 
 function fmtDate(iso: string) {
@@ -75,6 +77,8 @@ export default function OrdersTable({
     const [statusFilter,  setStatus]  = useState(defaultStatus);
     const [paymentFilter, setPayment] = useState("");
     const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const { settings } = useSettings();
+    const currency = (settings?.product_currency_symbol || settings?.currency_symbol || "") as string;
 
     const fetchOrders = useCallback(async (p: number, q: string, s: string, ps: string) => {
         setLoading(true);
@@ -218,7 +222,7 @@ export default function OrdersTable({
                                     <td className="px-5 py-3 text-gray-500">
                                         {order.items.length} item{order.items.length !== 1 ? "s" : ""}
                                     </td>
-                                    <td className="px-5 py-3 font-semibold text-gray-800">{fmt(order.total)}</td>
+                                    <td className="px-5 py-3 font-semibold text-gray-800">{fmt(order.total, currency)}</td>
                                     <td className="px-5 py-3">
                                         <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${STATUS_BADGE[order.status] ?? STATUS_BADGE.pending}`}>
                                             {order.status}

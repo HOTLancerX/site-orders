@@ -24,7 +24,7 @@ export default function SiteOrdersSettingsPage() {
     useEffect(() => {
         fetch("/api/settings", { cache: "no-store" })
             .then((r) => (r.ok ? r.json() : {}))
-            .then((data) => {
+            .then((data: { site_orders_sites?: string }) => {
                 if (data.site_orders_sites) {
                     try {
                         setSites(JSON.parse(data.site_orders_sites));

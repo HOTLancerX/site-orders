@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Icon } from "@iconify/react";
+import useSettings from "@/lib/useSettings";
 
 interface OrderItem {
     productTitle: string;
@@ -38,7 +39,7 @@ interface SiteOrder {
     _id: string;
     orderNumber: string;
     siteName: string;
-    siteUrl: string;
+    siteLogo: string;
     customerName: string;
     customerEmail: string;
     customerPhone: string;
@@ -50,6 +51,7 @@ interface SiteOrder {
     subtotal: number;
     total: number;
     notes?: string;
+    metadata?: { ipAddress?: string; device?: string; browser?: string; os?: string };
     timeline: TimelineEntry[];
     createdAt: string;
     updatedAt: string;
@@ -80,8 +82,9 @@ const TIMELINE_ICONS: Record<string, string> = {
     refunded:   "mdi:cash-refund",
 };
 
-function fmt(n: number) {
-    return Number(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+function fmt(n: number, symbol?: string) {
+    const formatted = Number(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    return symbol ? `${symbol}${formatted}` : formatted;
 }
 
 function fmtDate(iso: string) {
@@ -134,6 +137,9 @@ export default function AdminSiteOrderDetailPage() {
     const [note,       setNote]       = useState("");
     const [saving,     setSaving]     = useState(false);
     const [saveMsg,    setSaveMsg]    = useState("");
+    const [locationMap, setLocationMap] = useState<Record<string, string>>({});
+    const { settings } = useSettings();
+    const currency = (settings?.product_currency_symbol || settings?.currency_symbol || "") as string;
 
     const fetchOrder = async () => {
         if (!id) return;
@@ -156,6 +162,20 @@ export default function AdminSiteOrderDetailPage() {
     };
 
     useEffect(() => { fetchOrder(); }, [id]);
+
+    useEffect(() => {
+        fetch("/api/location/category?type=location")
+            .then((r) => (r.ok ? r.json() : { categories: [] }))
+            .then((data) => {
+                const map: Record<string, string> = {};
+                for (const loc of data.categories || []) {
+                    const locId = loc.id || loc._id;
+                    if (locId) map[locId] = loc.title;
+                }
+                setLocationMap(map);
+            })
+            .catch(() => {});
+    }, []);
 
     const handleSave = async () => {
         if (!order) return;
@@ -294,10 +314,10 @@ export default function AdminSiteOrderDetailPage() {
                                             </p>
                                         )}
                                         {item.sku && <p className="text-xs text-gray-400">SKU: {item.sku}</p>}
-                                        <p className="text-xs text-gray-400 mt-0.5">×{item.quantity} @ {fmt(item.price)}</p>
+                                        <p className="text-xs text-gray-400 mt-0.5">×{item.quantity} @ {fmt(item.price, currency)}</p>
                                     </div>
                                     <div className="text-right shrink-0">
-                                        <p className="text-sm font-bold text-gray-900">{fmt(item.subtotal)}</p>
+                                        <p className="text-sm font-bold text-gray-900">{fmt(item.subtotal, currency)}</p>
                                     </div>
                                 </div>
                             ))}
@@ -305,22 +325,25 @@ export default function AdminSiteOrderDetailPage() {
                         <div className="mt-4 pt-4 border-t border-gray-100 space-y-1.5">
                             <div className="flex justify-between text-sm text-gray-600">
                                 <span>Subtotal</span>
-                                <span className="font-medium">{fmt(order.subtotal)}</span>
+                                <span className="font-medium">{fmt(order.subtotal, currency)}</span>
                             </div>
                             <div className="flex justify-between text-sm text-gray-600">
                                 <span>Shipping</span>
-                                <span className="font-medium">{fmt(order.shippingCost)}</span>
+                                <span className="font-medium">{fmt(order.shippingCost, currency)}</span>
                             </div>
                             <div className="flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-100">
                                 <span>Total</span>
-                                <span>{fmt(order.total)}</span>
+                                <span>{fmt(order.total, currency)}</span>
                             </div>
                         </div>
                     </Card>
 
                     <Card title="Shipping Address" icon="mdi:map-marker-outline">
-                        <div className="text-sm text-gray-700 space-y-1">
-                            <p className="font-semibold text-gray-900">{order.shippingAddress.name}</p>
+                        <div className="text-sm text-gray-700 space-y-3">
+                            <p className="flex items-center gap-1.5 font-semibold text-gray-900">
+                                <Icon icon="uil:user" width={14} />
+                                {order.shippingAddress.name}
+                            </p>
                             {order.shippingAddress.phone && (
                                 <p className="flex items-center gap-1.5 text-gray-500">
                                     <Icon icon="mdi:phone-outline" width={14} />
@@ -335,9 +358,17 @@ export default function AdminSiteOrderDetailPage() {
                             )}
                             {order.shippingAddress.address && <p>{order.shippingAddress.address}</p>}
                             {(order.shippingAddress.city || order.shippingAddress.state) && (
-                                <p>{[order.shippingAddress.city, order.shippingAddress.state].filter(Boolean).join(", ")}</p>
+                                <p className="flex items-center gap-1.5 font-semibold text-gray-900">
+                                    <Icon icon="uil:map-marker-alt" width={14} />
+                                    {[locationMap[order.shippingAddress.city] || order.shippingAddress.city, locationMap[order.shippingAddress.state] || order.shippingAddress.state].filter(Boolean).join(", ")}
+                                </p>
                             )}
-                            {order.shippingAddress.zipCode && <p>{order.shippingAddress.zipCode}</p>}
+                            {order.shippingAddress.zipCode &&
+                                <p className="flex items-center gap-1.5 font-semibold text-gray-900">
+                                    <Icon icon="mdi:mailbox" width={14} />
+                                    {order.shippingAddress.zipCode}
+                                </p>
+                            }
                         </div>
                     </Card>
 
@@ -367,6 +398,26 @@ export default function AdminSiteOrderDetailPage() {
                 </div>
 
                 <div className="space-y-6">
+                    {order.siteName && (
+                        <Card title="Site Info" icon="mdi:web-outline">
+                            <div className="flex items-center gap-3">
+                                {order.siteLogo ? (
+                                    <div className="relative w-10 h-10 rounded-xl overflow-hidden bg-gray-100 shrink-0">
+                                        <Image src={order.siteLogo} alt={order.siteName}
+                                            fill className="object-contain p-0.5" sizes="40px" />
+                                    </div>
+                                ) : (
+                                    <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+                                        <Icon icon="mdi:web" width={20} className="text-violet-400" />
+                                    </div>
+                                )}
+                                <div className="min-w-0">
+                                    <p className="text-sm font-bold text-gray-900 truncate">{order.siteName}</p>
+                                </div>
+                            </div>
+                        </Card>
+                    )}
+
                     <Card title="Update Order" icon="mdi:pencil-outline">
                         <div className="space-y-4">
                             {saveMsg && (
@@ -434,21 +485,18 @@ export default function AdminSiteOrderDetailPage() {
                             <Row label="Placed"  value={fmtDate(order.createdAt)} />
                             <Row label="Updated" value={fmtDate(order.updatedAt)} />
                             <Row label="Customer" value={order.customerEmail || order.customerName || "—"} />
-                            <Row label="Shipping" value={<span className="capitalize">{fmt(order.shippingCost)}</span>} />
+                            <Row label="Shipping" value={<span className="capitalize">{fmt(order.shippingCost, currency)}</span>} />
                         </dl>
                     </Card>
 
-                    {order.siteUrl && (
-                        <Card title="Site Info" icon="mdi:web-outline">
-                            <div className="space-y-2 text-sm">
-                                <Row label="Site" value={<span className="font-medium text-violet-600">{order.siteName}</span>} />
-                                <Row label="URL" value={
-                                    <a href={order.siteUrl} target="_blank" rel="noopener noreferrer"
-                                        className="text-violet-500 hover:underline text-xs break-all">
-                                        {order.siteUrl}
-                                    </a>
-                                } />
-                            </div>
+                    {order.metadata && (
+                        <Card title="Metadata" icon="mdi:information-outline">
+                            <dl className="space-y-2 text-sm">
+                                {order.metadata.device    && <Row label="Device"  value={order.metadata.device} />}
+                                {order.metadata.browser   && <Row label="Browser" value={order.metadata.browser} />}
+                                {order.metadata.os        && <Row label="OS"      value={order.metadata.os} />}
+                                {order.metadata.ipAddress && <Row label="IP"      value={<span className="font-mono text-xs">{order.metadata.ipAddress}</span>} />}
+                            </dl>
                         </Card>
                     )}
 

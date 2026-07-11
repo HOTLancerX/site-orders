@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSiteOrdersCollection, initializeSiteOrdersCollection } from "@/plugin/site-orders/models/SiteOrder";
+import { findExternalOrderByNumber, updateExternalOrder } from "@/plugin/site-orders/models/SiteOrder";
 import { resolveUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -25,22 +25,19 @@ export async function GET(
             return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        await initializeSiteOrdersCollection();
-        const collection = await getSiteOrdersCollection();
-
-        const order = await collection.findOne({ orderNumber });
+        const order = await findExternalOrderByNumber(orderNumber);
         if (!order) {
             return NextResponse.json({ error: "Order not found" }, { status: 404 });
         }
 
-        return NextResponse.json({ order: { ...order, _id: order._id?.toString() } });
+        return NextResponse.json({ order });
     } catch (error) {
         console.error("Site Order GET error:", error);
         return NextResponse.json({ error: "Failed to fetch site order" }, { status: 500 });
     }
 }
 
-/** PUT /api/site-orders/:orderNumber — admin only */
+/** PUT /api/site-orders/:orderNumber — update status/payment in the external DB */
 export async function PUT(
     req: NextRequest,
     { params }: { params: Promise<{ orderNumber: string }> }
@@ -58,16 +55,14 @@ export async function PUT(
             return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        await initializeSiteOrdersCollection();
-        const collection = await getSiteOrdersCollection();
-
-        const order = await collection.findOne({ orderNumber });
-        if (!order) {
-            return NextResponse.json({ error: "Order not found" }, { status: 404 });
-        }
-
         const body = await req.json();
         const { status, paymentStatus, note } = body;
+
+        // Find the order first to get its site index
+        const existing = await findExternalOrderByNumber(orderNumber);
+        if (!existing) {
+            return NextResponse.json({ error: "Order not found" }, { status: 404 });
+        }
 
         const now = new Date();
         const $set: Record<string, any> = { updatedAt: now };
@@ -75,20 +70,35 @@ export async function PUT(
         if (paymentStatus) $set.paymentStatus = paymentStatus;
 
         const timelineEntry = {
-            status:        status ?? order.status,
-            note:          note || `Status updated to ${status ?? order.status}`,
+            status:        status ?? existing.status,
+            note:          note || `Status updated to ${status ?? existing.status}`,
             createdBy:     caller.userId,
             createdByName: "Admin",
             createdAt:     now,
         };
 
-        await collection.updateOne(
-            { orderNumber },
-            { $set, $push: { timeline: timelineEntry } } as any
-        );
+        // Determine where to update — local or external
+        const isLocal = !existing.siteUrl || existing.siteUrl === "";
 
-        const updated = await collection.findOne({ orderNumber });
-        return NextResponse.json({ order: { ...updated, _id: updated?._id?.toString() } });
+        if (isLocal) {
+            // Update in local site_orders collection
+            const { initializeSiteOrdersCollection, getSiteOrdersCollection } = await import("@/plugin/site-orders/models/SiteOrder");
+            await initializeSiteOrdersCollection();
+            const col = await getSiteOrdersCollection();
+            await col.updateOne(
+                { orderNumber },
+                { $set, $push: { timeline: timelineEntry } } as any
+            );
+        } else {
+            // Update in external DB
+            const siteIndex = (existing as any)._siteIndex ?? 0;
+            const pushUpdate = { $set: $set, $push: { timeline: timelineEntry } };
+            await updateExternalOrder(orderNumber, pushUpdate, siteIndex);
+        }
+
+        // Re-fetch the updated order
+        const updated = await findExternalOrderByNumber(orderNumber);
+        return NextResponse.json({ order: updated });
     } catch (error) {
         console.error("Site Order PUT error:", error);
         return NextResponse.json({ error: "Failed to update site order" }, { status: 500 });
