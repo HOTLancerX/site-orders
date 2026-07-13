@@ -4,7 +4,7 @@ import SiteOrdersSettingsPage from "./settings/SiteOrdersSettingsPage";
 
 export const PLUGINS: PluginMeta = {
     nx: "com.system.site-orders",
-    name: "Multi-side order system",
+    name: "site-orders",
     version: "1.0.0",
     description: "Multi-site order management — fetch and manage orders from external Manga DB sites.",
     author: "System",
